@@ -10,6 +10,9 @@ import * as Haptics from 'expo-haptics';
 import { EmojiItem } from '../data/emojiData';
 import { EmojiSlot } from './EmojiSlot';
 
+const LONG_PRESS_MS = 480;
+const SPIN_INTERVAL_MS = 100;
+
 interface DragState {
   fromIndex: number;
   toIndex: number;
@@ -58,6 +61,51 @@ export function SentenceStrip({
   const ghostY = useRef(new Animated.Value(0)).current;
   const ghostOpacity = useRef(new Animated.Value(0)).current;
 
+  const trashZoneRef = useRef<View>(null);
+  const trashZoneLayout = useRef<SlotLayout | null>(null);
+  const trashOpacity = useRef(new Animated.Value(0)).current;
+  const [isOverTrash, setIsOverTrash] = useState(false);
+  const isOverTrashRef = useRef(false);
+
+  const addHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const addSpinInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const addDidLongPress = useRef(false);
+  const [addSpinTargetIndex, setAddSpinTargetIndex] = useState<number | null>(null);
+  const onAddRef = useRef(onAdd);
+  onAddRef.current = onAdd;
+  const onTapSlotRef = useRef(onTapSlot);
+  onTapSlotRef.current = onTapSlot;
+
+  function handleAddPressIn() {
+    addDidLongPress.current = false;
+    addHoldTimer.current = setTimeout(() => {
+      addDidLongPress.current = true;
+      const newIndex = sentenceLengthRef.current;
+      setAddSpinTargetIndex(newIndex);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onAddRef.current();
+      addSpinInterval.current = setInterval(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onTapSlotRef.current(newIndex);
+      }, SPIN_INTERVAL_MS);
+    }, LONG_PRESS_MS);
+  }
+
+  function handleAddPressOut() {
+    if (addHoldTimer.current) {
+      clearTimeout(addHoldTimer.current);
+      addHoldTimer.current = null;
+    }
+    if (addSpinInterval.current) {
+      clearInterval(addSpinInterval.current);
+      addSpinInterval.current = null;
+    }
+    setAddSpinTargetIndex(null);
+    if (!addDidLongPress.current) {
+      onLongPressAdd();
+    }
+  }
+
   function measureAll() {
     stripRef.current?.measureInWindow((x, y) => {
       stripOrigin.current = { x, y };
@@ -66,6 +114,9 @@ export function SentenceStrip({
       ref?.measureInWindow((x, y, w, h) => {
         slotLayouts.current[i] = { x, y, width: w, height: h };
       });
+    });
+    trashZoneRef.current?.measureInWindow((x, y, w, h) => {
+      trashZoneLayout.current = { x, y, width: w, height: h };
     });
   }
 
@@ -94,6 +145,7 @@ export function SentenceStrip({
       ghostX.setValue(absX - stripOrigin.current.x - 40);
       ghostY.setValue(absY - stripOrigin.current.y - 40);
       ghostOpacity.setValue(0.88);
+      Animated.timing(trashOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     },
     [sentence]
@@ -103,11 +155,31 @@ export function SentenceStrip({
     if (!dragStateRef.current) return;
     ghostX.setValue(absX - stripOrigin.current.x - 40);
     ghostY.setValue(absY - stripOrigin.current.y - 40);
-    const toIndex = findClosestSlot(absX, absY);
-    if (toIndex !== dragStateRef.current.toIndex) {
-      const next: DragState = { ...dragStateRef.current, toIndex };
-      dragStateRef.current = next;
-      setDragState(next);
+
+    const tz = trashZoneLayout.current;
+    const overTrash = !!tz &&
+      absX >= tz.x && absX <= tz.x + tz.width &&
+      absY >= tz.y && absY <= tz.y + tz.height;
+
+    if (overTrash !== isOverTrashRef.current) {
+      isOverTrashRef.current = overTrash;
+      setIsOverTrash(overTrash);
+      if (overTrash) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        // Clear any drop-target highlight from slots
+        const next: DragState = { ...dragStateRef.current, toIndex: dragStateRef.current.fromIndex };
+        dragStateRef.current = next;
+        setDragState(next);
+      }
+    }
+
+    if (!overTrash) {
+      const toIndex = findClosestSlot(absX, absY);
+      if (toIndex !== dragStateRef.current.toIndex) {
+        const next: DragState = { ...dragStateRef.current, toIndex };
+        dragStateRef.current = next;
+        setDragState(next);
+      }
     }
   }, []);
 
@@ -115,47 +187,69 @@ export function SentenceStrip({
     if (!dragStateRef.current) return;
     const { fromIndex, toIndex } = dragStateRef.current;
     ghostOpacity.setValue(0);
+    Animated.timing(trashOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
     dragStateRef.current = null;
     setDragState(null);
-    if (fromIndex !== toIndex) {
+
+    if (isOverTrashRef.current) {
+      isOverTrashRef.current = false;
+      setIsOverTrash(false);
+      onRemoveSlot(fromIndex);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    } else if (fromIndex !== toIndex) {
       onMoveSlot(fromIndex, toIndex);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-  }, [onMoveSlot]);
+  }, [onMoveSlot, onRemoveSlot]);
 
   return (
     <View
       ref={stripRef}
-      style={styles.strip}
+      style={styles.wrapper}
       onLayout={() => {
         stripRef.current?.measureInWindow((x, y) => {
           stripOrigin.current = { x, y };
         });
       }}
     >
-      {sentence.map((item, i) => (
-        <EmojiSlot
-          key={i}
-          ref={(r) => { slotRefs.current[i] = r; }}
-          item={item}
-          onTap={() => onTapSlot(i)}
-          onLongPress={() => onLongPressSlot(i)}
-          onRemove={() => onRemoveSlot(i)}
-          onDragStart={(ax, ay) => handleDragStart(i, ax, ay)}
-          onDragMove={handleDragMove}
-          onDragEnd={handleDragEnd}
-          isDragging={dragState?.fromIndex === i}
-          isDropTarget={dragState !== null && dragState.toIndex === i && dragState.fromIndex !== i}
-        />
-      ))}
+      <View style={styles.strip}>
+        {sentence.map((item, i) => (
+          <EmojiSlot
+            key={i}
+            ref={(r) => { slotRefs.current[i] = r; }}
+            item={item}
+            onTap={() => onTapSlot(i)}
+            onLongPress={() => onLongPressSlot(i)}
+            onDragStart={(ax, ay) => handleDragStart(i, ax, ay)}
+            onDragMove={handleDragMove}
+            onDragEnd={handleDragEnd}
+            isDragging={dragState?.fromIndex === i}
+            isDropTarget={dragState !== null && dragState.toIndex === i && dragState.fromIndex !== i}
+            isSpinning={addSpinTargetIndex === i}
+          />
+        ))}
 
-      {sentence.length < maxLength && (
-        <Pressable style={styles.addBtn} onPress={onLongPressAdd} onLongPress={onAdd} delayLongPress={480}>
-          <Text style={styles.addText}>+</Text>
-        </Pressable>
-      )}
+        {sentence.length < maxLength && (
+          <Pressable
+            style={[styles.addBtn, addSpinTargetIndex !== null && styles.addBtnSpinning]}
+            onPressIn={handleAddPressIn}
+            onPressOut={handleAddPressOut}
+          >
+            <Text style={styles.addText}>+</Text>
+          </Pressable>
+        )}
+      </View>
 
-      {/* Ghost bubble follows the finger during drag */}
+      {/* Trash zone — fades in when a drag starts, drop here to delete */}
+      <Animated.View
+        ref={trashZoneRef}
+        pointerEvents="none"
+        style={[styles.trashZone, isOverTrash && styles.trashZoneActive, { opacity: trashOpacity }]}
+      >
+        <Text style={styles.trashEmoji}>🗑️</Text>
+      </Animated.View>
+
+      {/* Ghost bubble — last child so it renders above the trash zone */}
       <Animated.View
         pointerEvents="none"
         style={[
@@ -172,6 +266,9 @@ export function SentenceStrip({
 }
 
 const styles = StyleSheet.create({
+  wrapper: {
+    flex: 1,
+  },
   strip: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -179,6 +276,28 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 20,
     paddingVertical: 28,
+  },
+  trashZone: {
+    position: 'absolute',
+    bottom: 20,
+    left: 40,
+    right: 40,
+    height: 96,
+    borderRadius: 24,
+    backgroundColor: 'rgba(212, 83, 126, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(212, 83, 126, 0.35)',
+  },
+  trashZoneActive: {
+    backgroundColor: 'rgba(212, 83, 126, 0.28)',
+    borderStyle: 'solid',
+    borderColor: '#D4537E',
+  },
+  trashEmoji: {
+    fontSize: 32,
   },
   addBtn: {
     width: 80,
@@ -190,6 +309,11 @@ const styles = StyleSheet.create({
     borderColor: '#97C459',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  addBtnSpinning: {
+    backgroundColor: 'rgba(151, 196, 89, 0.2)',
+    borderStyle: 'solid',
+    borderColor: '#97C459',
   },
   addText: {
     fontSize: 32,

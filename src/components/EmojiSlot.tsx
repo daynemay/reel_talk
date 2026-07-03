@@ -1,10 +1,10 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useState, useEffect } from 'react';
 import {
   View,
   Text,
   Pressable,
   StyleSheet,
-  GestureResponderEvent,
+  Animated,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
@@ -14,23 +14,56 @@ interface Props {
   item: EmojiItem;
   onTap: () => void;
   onLongPress: () => void;
-  onRemove: () => void;
   onDragStart: (absX: number, absY: number) => void;
   onDragMove: (absX: number, absY: number) => void;
   onDragEnd: () => void;
   isDragging?: boolean;
   isDropTarget?: boolean;
+  isSpinning?: boolean;
 }
 
 const LONG_PRESS_MS = 480;
+const SPIN_INTERVAL_MS = 100;
 
 export const EmojiSlot = React.forwardRef<View, Props>(
-  ({ item, onTap, onLongPress, onRemove, onDragStart, onDragMove, onDragEnd, isDragging, isDropTarget }, ref) => {
+  ({ item, onTap, onLongPress, onDragStart, onDragMove, onDragEnd, isDragging, isDropTarget, isSpinning }, ref) => {
     const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const spinInterval = useRef<ReturnType<typeof setInterval> | null>(null);
     const didLongPress = useRef(false);
+    const [spinning, setSpinning] = useState(false);
+    const spinningRef = useRef(false);
+    const emojiScale = useRef(new Animated.Value(1)).current;
+    const onTapRef = useRef(onTap);
+    onTapRef.current = onTap;
 
     const dragCbs = useRef({ onDragStart, onDragMove, onDragEnd });
     dragCbs.current = { onDragStart, onDragMove, onDragEnd };
+
+    // Pop animation on each new emoji while spinning (internally or externally)
+    useEffect(() => {
+      if (!spinningRef.current && !isSpinning) return;
+      emojiScale.setValue(0.6);
+      Animated.timing(emojiScale, {
+        toValue: 1.0,
+        duration: 70,
+        useNativeDriver: true,
+      }).start();
+    }, [item]);
+
+    // Settle animation when external spin ends
+    const wasExternallySpinning = useRef(false);
+    useEffect(() => {
+      if (isSpinning) {
+        wasExternallySpinning.current = true;
+      } else if (wasExternallySpinning.current) {
+        wasExternallySpinning.current = false;
+        Animated.sequence([
+          Animated.timing(emojiScale, { toValue: 1.2, duration: 80, useNativeDriver: true }),
+          Animated.timing(emojiScale, { toValue: 1.0, duration: 80, useNativeDriver: true }),
+        ]).start();
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
+    }, [isSpinning]);
 
     const drag = useMemo(
       () =>
@@ -45,13 +78,35 @@ export const EmojiSlot = React.forwardRef<View, Props>(
       []
     );
 
+    function startSpin() {
+      didLongPress.current = true;
+      spinningRef.current = true;
+      setSpinning(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onTapRef.current();
+      spinInterval.current = setInterval(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onTapRef.current();
+      }, SPIN_INTERVAL_MS);
+    }
+
+    function stopSpin() {
+      if (spinInterval.current) {
+        clearInterval(spinInterval.current);
+        spinInterval.current = null;
+      }
+      spinningRef.current = false;
+      setSpinning(false);
+      Animated.sequence([
+        Animated.timing(emojiScale, { toValue: 1.2, duration: 80, useNativeDriver: true }),
+        Animated.timing(emojiScale, { toValue: 1.0, duration: 80, useNativeDriver: true }),
+      ]).start();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+
     function handlePressIn() {
       didLongPress.current = false;
-      holdTimer.current = setTimeout(() => {
-        didLongPress.current = true;
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        onTap();
-      }, LONG_PRESS_MS);
+      holdTimer.current = setTimeout(startSpin, LONG_PRESS_MS);
     }
 
     function handlePressOut() {
@@ -59,16 +114,12 @@ export const EmojiSlot = React.forwardRef<View, Props>(
         clearTimeout(holdTimer.current);
         holdTimer.current = null;
       }
-      if (!didLongPress.current) {
+      if (didLongPress.current) {
+        stopSpin();
+      } else {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         onLongPress();
       }
-    }
-
-    function handleRemove(e: GestureResponderEvent) {
-      e.stopPropagation();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      onRemove();
     }
 
     return (
@@ -78,16 +129,15 @@ export const EmojiSlot = React.forwardRef<View, Props>(
           onPressOut={handlePressOut}
           style={({ pressed }) => [
             styles.bubble,
-            pressed && !isDragging && styles.bubblePressed,
+            pressed && !isDragging && !spinning && !isSpinning && styles.bubblePressed,
             isDragging && styles.bubbleDragging,
             isDropTarget && styles.bubbleDropTarget,
+            (spinning || isSpinning) && styles.bubbleSpinning,
           ]}
         >
-          <Text style={styles.emoji}>{item.emoji}</Text>
-        </Pressable>
-
-        <Pressable style={styles.removeBadge} onPress={handleRemove} hitSlop={8}>
-          <Text style={styles.removeText}>✕</Text>
+          <Animated.Text style={[styles.emoji, { transform: [{ scale: emojiScale }] }]}>
+            {item.emoji}
+          </Animated.Text>
         </Pressable>
 
         <Text style={styles.label} numberOfLines={2}>
@@ -130,6 +180,11 @@ const styles = StyleSheet.create({
     borderWidth: 2.5,
     borderColor: '#534AB7',
   },
+  bubbleSpinning: {
+    backgroundColor: 'rgba(83, 74, 183, 0.1)',
+    borderWidth: 2,
+    borderColor: 'rgba(83, 74, 183, 0.35)',
+  },
   emoji: {
     fontSize: 36,
   },
@@ -139,23 +194,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     width: 80,
     lineHeight: 14,
-  },
-  removeBadge: {
-    position: 'absolute',
-    top: -5,
-    right: -5,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#D4537E',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 2,
-  },
-  removeText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: '600',
   },
   dragHandle: {
     paddingVertical: 4,

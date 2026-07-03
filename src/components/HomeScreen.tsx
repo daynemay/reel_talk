@@ -111,7 +111,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <Text style={styles.title}>reel talk 🎬</Text>
-        <Text style={styles.hint}>tap to pick · hold to randomize · drag ⠿ to move</Text>
+        <Text style={styles.hint}>tap to pick · hold to spin · drag ⠿ to move</Text>
       </View>
 
       <View style={styles.stage}>
