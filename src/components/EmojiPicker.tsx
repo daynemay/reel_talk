@@ -1,14 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Modal,
   View,
   Text,
   Pressable,
-  FlatList,
+  SectionList,
   ScrollView,
   StyleSheet,
+  ViewabilityConfig,
 } from 'react-native';
 import { EMOJI_CATEGORIES, EmojiCategory, EmojiItem } from '../data/emojiData';
+
+const COLS = 4;
+type GridRow = EmojiItem[];
+
+interface Section {
+  id: string;
+  title: string;
+  icon: string;
+  data: GridRow[];
+}
 
 const RECENTS_CATEGORY: EmojiCategory = {
   id: 'recent',
@@ -16,6 +27,14 @@ const RECENTS_CATEGORY: EmojiCategory = {
   icon: '🕐',
   items: [],
 };
+
+function chunkRows(items: EmojiItem[]): GridRow[] {
+  const rows: GridRow[] = [];
+  for (let i = 0; i < items.length; i += COLS) {
+    rows.push(items.slice(i, i + COLS));
+  }
+  return rows;
+}
 
 interface Props {
   visible: boolean;
@@ -29,18 +48,25 @@ interface Props {
 
 export function EmojiPicker({ visible, recents, onUsed, onReplace, onAddAfter, onClose, appendOnly }: Props) {
   const [activeCatId, setActiveCatId] = useState(EMOJI_CATEGORIES[0].id);
+  const listRef = useRef<SectionList<GridRow, Section>>(null);
+  const programmaticScroll = useRef(false);
 
   const categories: EmojiCategory[] = recents.length > 0
     ? [{ ...RECENTS_CATEGORY, items: recents }, ...EMOJI_CATEGORIES]
     : EMOJI_CATEGORIES;
+
+  const sections: Section[] = categories.map((cat) => ({
+    id: cat.id,
+    title: cat.name,
+    icon: cat.icon,
+    data: chunkRows(cat.items),
+  }));
 
   useEffect(() => {
     if (visible) {
       setActiveCatId(recents.length > 0 ? 'recent' : EMOJI_CATEGORIES[0].id);
     }
   }, [visible]);
-
-  const activeCategory = categories.find((c) => c.id === activeCatId) ?? categories[0];
 
   function handleSelectItem(item: EmojiItem) {
     onUsed(item);
@@ -51,68 +77,94 @@ export function EmojiPicker({ visible, recents, onUsed, onReplace, onAddAfter, o
     }
   }
 
-  function handleClose() {
-    onClose();
+  function handleTabPress(id: string, sectionIndex: number) {
+    setActiveCatId(id);
+    programmaticScroll.current = true;
+    listRef.current?.scrollToLocation({ sectionIndex, itemIndex: 0, animated: true });
+    setTimeout(() => { programmaticScroll.current = false; }, 600);
   }
 
-  function handleCatChange(id: string) {
-    setActiveCatId(id);
-  }
+  const viewabilityConfig = useRef<ViewabilityConfig>({
+    itemVisiblePercentThreshold: 20,
+  }).current;
+
+  // Stable callback required by SectionList
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
+    if (programmaticScroll.current) return;
+    const first = viewableItems[0];
+    if (!first) return;
+    // Regular items carry first.section.id; section headers carry first.item.id
+    const id = first.section?.id ?? first.item?.id;
+    if (id) setActiveCatId(id);
+  }).current;
 
   return (
     <Modal
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={handleClose}
+      onRequestClose={onClose}
     >
       <View style={styles.container}>
-        {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>pick an emoji</Text>
-          <Pressable style={styles.closeBtn} onPress={handleClose}>
+          <Pressable style={styles.closeBtn} onPress={onClose}>
             <Text style={styles.closeBtnText}>✕</Text>
           </Pressable>
         </View>
 
-        {/* Category tabs */}
+        {/* Jump tabs — scroll to section on press, highlight active on scroll */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.tabScroll}
           contentContainerStyle={styles.tabs}
         >
-          {categories.map((cat) => (
+          {sections.map((sec, index) => (
             <Pressable
-              key={cat.id}
-              style={[styles.tab, activeCatId === cat.id && styles.tabActive]}
-              onPress={() => handleCatChange(cat.id)}
+              key={sec.id}
+              style={[styles.tab, activeCatId === sec.id && styles.tabActive]}
+              onPress={() => handleTabPress(sec.id, index)}
             >
-              <Text style={[styles.tabText, activeCatId === cat.id && styles.tabTextActive]}>
-                {cat.icon} {cat.name}
+              <Text style={[styles.tabText, activeCatId === sec.id && styles.tabTextActive]}>
+                {sec.icon} {sec.title}
               </Text>
             </Pressable>
           ))}
         </ScrollView>
 
-        {/* Emoji grid */}
-        <FlatList
-          data={activeCategory.items}
-          keyExtractor={(item) => item.emoji}
-          numColumns={4}
-          style={styles.grid}
-          contentContainerStyle={styles.gridContent}
-          renderItem={({ item }) => (
-            <Pressable
-              style={styles.gridItem}
-              onPress={() => handleSelectItem(item)}
-            >
-              <Text style={styles.gridEmoji}>{item.emoji}</Text>
-              <Text style={styles.gridLabel} numberOfLines={2}>{item.label}</Text>
-            </Pressable>
+        <SectionList<GridRow, Section>
+          ref={listRef}
+          sections={sections}
+          keyExtractor={(row, i) => `${row[0]?.emoji ?? 'empty'}-${i}`}
+          stickySectionHeadersEnabled
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
+          renderSectionHeader={({ section }) => (
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionHeaderText}>{section.icon}  {section.title}</Text>
+            </View>
           )}
+          renderItem={({ item: row }) => (
+            <View style={styles.gridRow}>
+              {row.map((item) => (
+                <Pressable
+                  key={item.emoji}
+                  style={styles.gridItem}
+                  onPress={() => handleSelectItem(item)}
+                >
+                  <Text style={styles.gridEmoji}>{item.emoji}</Text>
+                  <Text style={styles.gridLabel} numberOfLines={2}>{item.label}</Text>
+                </Pressable>
+              ))}
+              {row.length < COLS && Array.from({ length: COLS - row.length }).map((_item, i) => (
+                <View key={`pad-${i}`} style={styles.gridItemPad} />
+              ))}
+            </View>
+          )}
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
         />
-
       </View>
     </Modal>
   );
@@ -178,16 +230,34 @@ const styles = StyleSheet.create({
   tabTextActive: {
     color: 'white',
   },
-  grid: {
+  list: {
     flex: 1,
   },
-  gridContent: {
+  listContent: {
+    paddingBottom: 24,
+  },
+  sectionHeader: {
+    backgroundColor: '#FFF9F0',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEDFE',
+  },
+  sectionHeaderText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#3C3489',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  gridRow: {
+    flexDirection: 'row',
     paddingHorizontal: 12,
+    paddingTop: 8,
     gap: 8,
   },
   gridItem: {
     flex: 1,
-    margin: 4,
     alignItems: 'center',
     padding: 8,
     borderRadius: 12,
@@ -196,9 +266,8 @@ const styles = StyleSheet.create({
     borderColor: '#EEEDFE',
     gap: 4,
   },
-  gridItemSelected: {
-    backgroundColor: '#EEEDFE',
-    borderColor: '#534AB7',
+  gridItemPad: {
+    flex: 1,
   },
   gridEmoji: {
     fontSize: 28,
@@ -208,36 +277,5 @@ const styles = StyleSheet.create({
     color: '#534AB7',
     textAlign: 'center',
     lineHeight: 12,
-  },
-  footer: {
-    flexDirection: 'row',
-    gap: 10,
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#EEEDFE',
-  },
-  footerBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 999,
-    alignItems: 'center',
-  },
-  replaceBtn: {
-    backgroundColor: '#534AB7',
-  },
-  replaceBtnText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 15,
-  },
-  addBtn: {
-    backgroundColor: '#EAF3DE',
-    borderWidth: 1.5,
-    borderColor: '#97C459',
-  },
-  addBtnText: {
-    color: '#3B6D11',
-    fontWeight: '600',
-    fontSize: 15,
   },
 });
