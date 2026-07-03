@@ -110,7 +110,6 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <Text style={styles.title}>reel talk 🎬</Text>
         <Text style={styles.hint}>tap to pick · hold to spin · drag ⠿ to move</Text>
       </View>
 
@@ -171,15 +170,8 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 20,
-    gap: 6,
-  },
-  title: {
-    fontSize: 40,
-    fontWeight: '800',
-    color: '#3C3489',
-    letterSpacing: -1,
+    paddingTop: 12,
+    paddingBottom: 12,
   },
   hint: {
     fontSize: 13,
