@@ -9,6 +9,7 @@ import {
   StyleSheet,
   ViewabilityConfig,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EMOJI_CATEGORIES, EmojiCategory, EmojiItem } from '../data/emojiData';
 
 const COLS = 4;
@@ -47,6 +48,7 @@ interface Props {
 }
 
 export function EmojiPicker({ visible, recents, onUsed, onReplace, onAddAfter, onClose, appendOnly }: Props) {
+  const { top: topInset } = useSafeAreaInsets();
   const [activeCatId, setActiveCatId] = useState(EMOJI_CATEGORIES[0].id);
   const listRef = useRef<SectionList<GridRow, Section>>(null);
   const programmaticScroll = useRef(false);
@@ -105,7 +107,7 @@ export function EmojiPicker({ visible, recents, onUsed, onReplace, onAddAfter, o
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: topInset + 16 }]}>
         <View style={styles.header}>
           <Text style={styles.title}>pick an emoji</Text>
           <Pressable style={styles.closeBtn} onPress={onClose}>
@@ -174,7 +176,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFF9F0',
-    paddingTop: 16,
   },
   header: {
     flexDirection: 'row',
