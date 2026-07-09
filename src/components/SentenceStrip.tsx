@@ -12,6 +12,9 @@ import { EmojiSlot } from './EmojiSlot';
 
 const LONG_PRESS_MS = 480;
 const SPIN_INTERVAL_MS = 100;
+const MIN_TRASH_HEIGHT = 80;
+const TRASH_BOTTOM_MARGIN = 20;
+const TRASH_TOP_GAP = 12;
 
 interface DragState {
   fromIndex: number;
@@ -66,6 +69,11 @@ export function SentenceStrip({
   const trashOpacity = useRef(new Animated.Value(0)).current;
   const [isOverTrash, setIsOverTrash] = useState(false);
   const isOverTrashRef = useRef(false);
+  const [wrapperHeight, setWrapperHeight] = useState(0);
+  const [stripHeight, setStripHeight] = useState(0);
+  const trashZoneHeight = wrapperHeight > 0 && stripHeight > 0
+    ? Math.max(MIN_TRASH_HEIGHT, wrapperHeight - stripHeight - TRASH_BOTTOM_MARGIN - TRASH_TOP_GAP)
+    : 96;
 
   const addHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addSpinInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -206,13 +214,14 @@ export function SentenceStrip({
     <View
       ref={stripRef}
       style={styles.wrapper}
-      onLayout={() => {
+      onLayout={(e) => {
+        setWrapperHeight(e.nativeEvent.layout.height);
         stripRef.current?.measureInWindow((x, y) => {
           stripOrigin.current = { x, y };
         });
       }}
     >
-      <View style={styles.strip}>
+      <View style={styles.strip} onLayout={(e) => setStripHeight(e.nativeEvent.layout.height)}>
         {sentence.map((item, i) => (
           <EmojiSlot
             key={i}
@@ -244,7 +253,7 @@ export function SentenceStrip({
       <Animated.View
         ref={trashZoneRef}
         pointerEvents="none"
-        style={[styles.trashZone, isOverTrash && styles.trashZoneActive, { opacity: trashOpacity }]}
+        style={[styles.trashZone, isOverTrash && styles.trashZoneActive, { opacity: trashOpacity, height: trashZoneHeight }]}
       >
         <Text style={styles.trashEmoji}>🗑️</Text>
       </Animated.View>
@@ -279,10 +288,9 @@ const styles = StyleSheet.create({
   },
   trashZone: {
     position: 'absolute',
-    bottom: 20,
+    bottom: TRASH_BOTTOM_MARGIN,
     left: 40,
     right: 40,
-    height: 96,
     borderRadius: 24,
     backgroundColor: 'rgba(212, 83, 126, 0.12)',
     alignItems: 'center',
