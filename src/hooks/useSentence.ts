@@ -33,7 +33,7 @@ export function useSentence() {
   }, []);
 
   const addRandom = useCallback(() => {
-    if (sentence.length >= 8) return;
+    if (sentence.length >= 24) return;
     setSentence((prev) => [...prev, randomItem(ALL_EMOJI)]);
   }, [sentence.length]);
 
