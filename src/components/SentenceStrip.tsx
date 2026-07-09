@@ -5,6 +5,7 @@ import {
   Pressable,
   Text,
   StyleSheet,
+  ScrollView,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { EmojiItem } from '../data/emojiData';
@@ -48,7 +49,7 @@ export function SentenceStrip({
   onAdd,
   onLongPressAdd,
   onMoveSlot,
-  maxLength = 8,
+  maxLength = 24,
 }: Props) {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
@@ -70,10 +71,10 @@ export function SentenceStrip({
   const [isOverTrash, setIsOverTrash] = useState(false);
   const isOverTrashRef = useRef(false);
   const [wrapperHeight, setWrapperHeight] = useState(0);
-  const [stripHeight, setStripHeight] = useState(0);
-  const trashZoneHeight = wrapperHeight > 0 && stripHeight > 0
-    ? Math.max(MIN_TRASH_HEIGHT, wrapperHeight - stripHeight - TRASH_BOTTOM_MARGIN - TRASH_TOP_GAP)
-    : 96;
+  // Trash zone is a fixed overlay; use ~22% of the stage height, minimum MIN_TRASH_HEIGHT
+  const trashZoneHeight = wrapperHeight > 0
+    ? Math.max(MIN_TRASH_HEIGHT, Math.floor(wrapperHeight * 0.22))
+    : MIN_TRASH_HEIGHT;
 
   const addHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addSpinInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -221,7 +222,13 @@ export function SentenceStrip({
         });
       }}
     >
-      <View style={styles.strip} onLayout={(e) => setStripHeight(e.nativeEvent.layout.height)}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.strip}
+        scrollEnabled={dragState === null}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         {sentence.map((item, i) => (
           <EmojiSlot
             key={i}
@@ -247,7 +254,7 @@ export function SentenceStrip({
             <Text style={styles.addText}>+</Text>
           </Pressable>
         )}
-      </View>
+      </ScrollView>
 
       {/* Trash zone — fades in when a drag starts, drop here to delete */}
       <Animated.View
@@ -276,6 +283,9 @@ export function SentenceStrip({
 
 const styles = StyleSheet.create({
   wrapper: {
+    flex: 1,
+  },
+  scrollView: {
     flex: 1,
   },
   strip: {
