@@ -71,10 +71,16 @@ export function SentenceStrip({
   const [isOverTrash, setIsOverTrash] = useState(false);
   const isOverTrashRef = useRef(false);
   const [wrapperHeight, setWrapperHeight] = useState(0);
-  // Trash zone is a fixed overlay; use ~22% of the stage height, minimum MIN_TRASH_HEIGHT
-  const trashZoneHeight = wrapperHeight > 0
-    ? Math.max(MIN_TRASH_HEIGHT, Math.floor(wrapperHeight * 0.22))
-    : MIN_TRASH_HEIGHT;
+  const [contentHeight, setContentHeight] = useState(0);
+  // When content fits without scrolling, fill the remaining space (original behaviour).
+  // When content overflows, use a fixed ~22% overlay so the trash zone stays reachable.
+  const trashZoneHeight = (() => {
+    if (wrapperHeight === 0) return MIN_TRASH_HEIGHT;
+    if (contentHeight > 0 && contentHeight <= wrapperHeight) {
+      return Math.max(MIN_TRASH_HEIGHT, wrapperHeight - contentHeight - TRASH_BOTTOM_MARGIN - TRASH_TOP_GAP);
+    }
+    return Math.max(MIN_TRASH_HEIGHT, Math.floor(wrapperHeight * 0.22));
+  })();
 
   const addHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addSpinInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -228,6 +234,7 @@ export function SentenceStrip({
         scrollEnabled={dragState === null}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        onContentSizeChange={(_, h) => setContentHeight(h)}
       >
         {sentence.map((item, i) => (
           <EmojiSlot
